@@ -6,89 +6,91 @@ import requests
 from gtts import gTTS
 import pygame
 import os
-import ollama  # Replacing OpenAI
+from dotenv import load_dotenv
+import sys
+
+# Import AI function from client.py
+from client import ask_jarvis
+
+# Load environment variables
+load_dotenv()
+
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
 recognizer = sr.Recognizer()
-engine = pyttsx3.init() 
-newsapi = "bea06f1f4ff14bbd8e78352e7309f755"
-
-# Initialize Ollama client
-client = ollama.Client(host="http://localhost:11434")
-
-def speak_old(text):
-    engine.say(text)
-    engine.runAndWait()
+engine = pyttsx3.init()
 
 def speak(text):
-    tts = gTTS(text)
-    tts.save('temp.mp3') 
-
-    pygame.mixer.init()
-    pygame.mixer.music.load('temp.mp3')
-    pygame.mixer.music.play()
-
-    while pygame.mixer.music.get_busy():
-        pygame.time.Clock().tick(10)
-    
-    pygame.mixer.music.unload()
-    os.remove("temp.mp3") 
-
-def aiProcess(command):
+    """Speak text via gTTS + pygame"""
     try:
-        response = client.chat(
-            model='llama3',
-            messages=[
-                {"role": "system", "content": "You are a virtual assistant named jarvis skilled in general tasks like Alexa and Google Cloud. Give short responses please"},
-                {"role": "user", "content": command}
-            ]
-        )
-        return response['message']['content']
+        tts = gTTS(text)
+        tts.save('temp.mp3')
+
+        pygame.mixer.init()
+        pygame.mixer.music.load('temp.mp3')
+        pygame.mixer.music.play()
+
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)
+
+        pygame.mixer.music.unload()
+        os.remove("temp.mp3")
     except Exception as e:
-        return "Sorry, I couldn't process that."
+        print(f"[main.py] Speak error: {e}", file=sys.stderr)
 
 def processCommand(c):
-    if "open google" in c.lower():
+    cl = c.lower()
+    if "open google" in cl:
         webbrowser.open("https://google.com")
-    elif "open facebook" in c.lower():
+    elif "open facebook" in cl:
         webbrowser.open("https://facebook.com")
-    elif "open youtube" in c.lower():
+    elif "open youtube" in cl:
         webbrowser.open("https://youtube.com")
-    elif "open linkedin" in c.lower():
+    elif "open linkedin" in cl:
         webbrowser.open("https://linkedin.com")
-    elif c.lower().startswith("play"):
-        song = c.lower().split(" ")[1]
-        link = musicLibrary.music[song]
-        webbrowser.open(link)
-
-    elif "news" in c.lower():
-        r = requests.get(f"https://newsapi.org/v2/top-headlines?country=in&apiKey={newsapi}")
-        if r.status_code == 200:
-            data = r.json()
-            articles = data.get('articles', [])
-            for article in articles:
-                speak(article['title'])
-
+    elif cl.startswith("play"):
+        song = cl.split(" ", 1)[1] if len(cl.split()) > 1 else None
+        link = musicLibrary.music.get(song) if song else None
+        speak(f"Playing {song}" if link else f"Song {song} not found.")
+        if link:
+            webbrowser.open(link)
+    elif "news" in cl:
+        if not NEWSAPI_KEY:
+            speak("News API key is missing. Cannot fetch news.")
+            return
+        try:
+            r = requests.get(f"https://newsapi.org/v2/top-headlines?country=in&apiKey={NEWSAPI_KEY}", timeout=5)
+            if r.status_code == 200:
+                articles = r.json().get('articles', [])
+                if not articles:
+                    speak("No news articles found.")
+                for article in articles:
+                    speak(article.get('title', 'No title'))
+            else:
+                speak(f"Failed to fetch news. Status code {r.status_code}.")
+        except Exception as e:
+            print(f"[main.py] News fetch error: {e}", file=sys.stderr)
+            speak("Error fetching news.")
     else:
-        output = aiProcess(c)
-        speak(output) 
+        output = ask_jarvis(c)
+        speak(output)
 
 if __name__ == "__main__":
-    speak("Initializing Jarvis....")
+    speak("Initializing Jarvis...")
     while True:
-        r = sr.Recognizer()
-        print("recognizing...")
+        print("Recognizing...")
         try:
             with sr.Microphone() as source:
                 print("Listening...")
-                audio = r.listen(source, timeout=2, phrase_time_limit=1)
-            word = r.recognize_google(audio)
-            if(word.lower() == "jarvis"):
-                speak("Yeah I am Listening...")
+                audio = recognizer.listen(source, timeout=2, phrase_time_limit=1)
+            word = recognizer.recognize_google(audio)
+            if word.lower() == "jarvis":
+                speak("Yeah, I am listening...")
                 with sr.Microphone() as source:
                     print("Jarvis Active...")
-                    audio = r.listen(source)
-                    command = r.recognize_google(audio)
+                    audio = recognizer.listen(source)
+                    command = recognizer.recognize_google(audio)
                     processCommand(command)
-
         except Exception as e:
-            print("Error; {0}".format(e))
+            print(f"[main.py] Error: {e}", file=sys.stderr)
+
